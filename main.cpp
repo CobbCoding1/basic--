@@ -1,6 +1,7 @@
 #include <iostream>
 #include <fstream>
 #include <vector>
+#include <variant>
 #include <queue>
 
 using namespace std;
@@ -50,58 +51,93 @@ public:
     }
 };
 
-class Node{
-public:
-    TokenType op;
-    string left;
-    string right;
+struct IntLiteral{
+    string value;
 };
+
+struct BinExpr{
+    TokenType op;
+    std::variant<BinExpr*, IntLiteral*> left;
+    std::variant<BinExpr*, IntLiteral*> right;
+};
+
 
 class Parser{
 public:
     Lexer lexer;
-    Node *tree;
-    Node *current_node;
+    BinExpr *tree;
+    BinExpr *current_node;
 
     Parser(){
-        tree = new Node;
+        tree = new BinExpr();
         current_node = tree;
     }
 
     void parse_lexer(){
         while(!lexer.tokens.empty()){
-            Token current = get_next_token();
-            Token next;
-            switch(current.type){
-                case TokenType::TYPE_INT:
-                    next = get_next_token();
-                    if(!is_operator(next)){
-                        cerr << "error: expected operator" << endl;
-                        exit(1);
-                    }
-                    current_node->left = current.text;
-                    current_node->op = next.type;
-                    next = get_next_token();
-                    if(next.type != TokenType::TYPE_INT){
-                        cerr << "error: expected int" << endl;
-                        exit(1);
-                    }
-                    current_node->right = next.text;
-                    break;
-                case TokenType::TYPE_PLUS:
-                    current_node->op = current.type; 
-                    break;
-                case TokenType::TYPE_MINUS:
-                    current_node->op = current.type;
-                    break;
-            }
+            tree = generate_expr();
         }
-        print_tree();
+        print_tree(tree);
     }
 private: 
-    void print_tree(){
-        current_node = tree;
-        cout << current_node->left << print_token_type(current_node->op) << current_node->right << endl;
+    BinExpr *generate_expr(){
+        BinExpr *expr = generate_term();
+        while(!lexer.tokens.empty()){
+            Token token = get_next_token();
+            if(!is_operator(token)){
+                break;
+            }
+            BinExpr *new_expr = new BinExpr();
+            new_expr->op = token.type;
+            new_expr->left = expr;
+            new_expr->right = generate_term();
+            if(get<BinExpr*>(new_expr->right) == nullptr){
+                break;
+            }
+            expr = new_expr;
+        }
+        return expr;
+    }
+    BinExpr *generate_term(){
+        Token token = get_next_token();
+        if(token.type == TokenType::TYPE_INT){
+            if(token.text == ""){
+                return nullptr;
+            }
+            IntLiteral* literal = new IntLiteral;
+            literal->value = token.text;
+            BinExpr *expr = new BinExpr();
+            expr->left = literal;
+            expr->right = new IntLiteral();
+            return expr;
+        } else {
+            return nullptr;
+        }
+    }
+    void print_tree(BinExpr *current_node){
+        if(current_node != nullptr){
+            if(holds_alternative<IntLiteral*>(current_node->left)){
+                IntLiteral *int_node_left = get<IntLiteral*>(current_node->left);
+                cout << int_node_left->value;
+            } else {
+                BinExpr *bin_node = get<BinExpr*>(current_node->left);
+                print_tree(bin_node);
+            }
+
+            if(current_node->op == TokenType::TYPE_PLUS){
+                cout << " + ";
+            } else if(current_node->op == TokenType::TYPE_MINUS){
+                cout << " - ";
+            }
+
+            if(holds_alternative<IntLiteral*>(current_node->right)){
+                IntLiteral *int_node_right = get<IntLiteral*>(current_node->right);
+                cout << int_node_right->value;
+            } else {
+                BinExpr *bin_node = get<BinExpr*>(current_node->right);
+                print_tree(bin_node);
+            }
+        }
     }
     bool is_operator(Token token){
         if(token.type == TokenType::TYPE_PLUS || token.type == TokenType::TYPE_MINUS){
@@ -110,6 +146,9 @@ private:
         return false;
     }
     Token get_next_token(){
+        if(lexer.tokens.empty()){
+            return { TokenType::TYPE_INT, "" };
+        }
         Token token = lexer.tokens.front();
         lexer.tokens.pop();
         return token;
